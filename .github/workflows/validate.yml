@@ -1,0 +1,23 @@
+name: Source checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check userscript and extension syntax
+        run: |
+          node --check userscript/Codex_Quota_Bars_Web_CN_v1.4.user.js
+          node --check edge-extension/background.js
+          node --check edge-extension/bridge.js
+      - name: Validate extension manifest and permissions
+        run: node tests/manifest.test.cjs
+      - name: Test RAM bridge
+        run: node tests/bridge.test.cjs

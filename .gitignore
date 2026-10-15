@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+playwright-report/
+test-results/
+.DS_Store
+Thumbs.db
+.env
+.env.*
+*.log

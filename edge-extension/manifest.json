@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Codex RAM Bridge (local-only)",
+  "version": "1.4.0",
+  "description": "Read system physical RAM on ChatGPT pages for the Codex Quota v1.4 userscript. No browsing-history access or remote servers.",
+  "permissions": [
+    "system.memory"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
