@@ -1,0 +1,2 @@
+754c91d1fa9e68837f7a387593a56ae563ed1b50ea37ccaeb2fc951156ab420b  codex-quota-monitor-v1.5.0-install.zip
+27c5cfc7a61b1f2ef52424a6e541e5a99e85827b84d049970e671446668d567d  Codex_Quota_Bars_Web_CN_v1.5.user.js

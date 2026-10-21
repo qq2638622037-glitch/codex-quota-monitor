@@ -4,7 +4,7 @@ import os, tempfile
 from playwright.async_api import async_playwright
 
 ROOT=Path(__file__).resolve().parents[1]
-JS=(ROOT/'userscript/Codex_Quota_Bars_Web_CN_v1.4.user.js').read_text()
+JS=(ROOT/'userscript/Codex_Quota_Bars_Web_CN_v1.5.user.js').read_text()
 PAGE='''<!doctype html><html class="dark"><head><meta charset="utf-8"><style>
 html,body{margin:0;background:#161616;color:white;font-family:sans-serif;}
 main{padding:10px} #composer{position:fixed;right:15px;bottom:50px;width:350px;}
@@ -13,12 +13,21 @@ main{padding:10px} #composer{position:fixed;right:15px;bottom:50px;width:350px;}
 <form id="composer"><textarea id="prompt" placeholder="Prompt"></textarea><button type="button">send</button></form>
 </body></html>'''
 SETUP='''() => {
-  window.__lsData={};window.__ssData={};window.__requests=0;
+  window.__lsData={};window.__ssData={};window.__requests=0;window.__forecastRequests=0;window.__forecastMode='ok';window.__forecastOptions=[];
   const createStore=key=>({getItem:x=>(window[key][x]??null),setItem:(x,v)=>{window[key][x]=String(v)},removeItem:x=>{delete window[key][x]}});
   Object.defineProperty(window,'localStorage',{configurable:true,value:createStore('__lsData')});
   Object.defineProperty(window,'sessionStorage',{configurable:true,value:createStore('__ssData')});
   window.postMessage = () => {}; // about:blank origin 'null' is not a valid postMessage targetOrigin
-  window.fetch = async (path)=>{
+  window.fetch = async (path, opts={})=>{
+    if(String(path).startsWith('https://codex-reset.com/')) {
+      window.__forecastRequests++;
+      window.__forecastOptions.push({credentials:opts.credentials,referrerPolicy:opts.referrerPolicy});
+      if(window.__forecastMode==='blocked') throw new TypeError('CSP blocks external fetch');
+      const d=new Date(Date.now()-(window.__forecastMode==='stale'?24*3600000:30000)).toISOString();
+      const p24=window.__forecastMode==='invalid'?85:22;
+      return new Response(JSON.stringify({updated_at:d,confidence:'low',
+        probabilities:{rounded_24h:p24,rounded_48h:39}}),{status:200,headers:{'Content-Type':'application/json'}});
+    }
     window.__requests++;
     return new Response(JSON.stringify({rate_limit:{
       primary_window:{limit_window_seconds:18000,used_percent:86,reset_at:Math.floor(Date.now()/1000)+14400},
@@ -28,11 +37,13 @@ SETUP='''() => {
 }'''
 HOST='#codex-quota-cn-overlay-v1'
 
-async def add_script(p,cache=None):
+async def add_script(p,cache=None,forecast_cache=None):
  await p.set_content(PAGE)
  await p.evaluate(SETUP)
  if cache:
   await p.evaluate('v=>localStorage.setItem("codex-quota-cn-shared-data-v14",v)',cache)
+ if forecast_cache:
+  await p.evaluate('v=>localStorage.setItem("codex-quota-cn-forecast-data-v15",v)',forecast_cache)
  await p.evaluate(JS)
  await p.wait_for_timeout(850)
 
@@ -50,12 +61,21 @@ async def main():
   assert '剩余 14%' in data['txt'] and '剩余 2%' in data['txt']
   assert data['five']=='warn' and data['week']=='critical'
   assert await a.evaluate('window.__requests')==1
+  forecast=await ui(a,'''({value:s.querySelector('#forecast .value').textContent,
+      source:s.querySelector('#forecast a').href,meta:s.querySelector('#forecast .forecast-meta').textContent})''')
+  assert '24h 22%' in forecast['value'] and '48h 39%' in forecast['value'],forecast
+  assert 'codex-reset.com' in forecast['source'] and '低置信度' in forecast['meta'],forecast
+  assert await a.evaluate('window.__forecastRequests')==1
+  assert (await a.evaluate('window.__forecastOptions'))==[{'credentials':'omit','referrerPolicy':'no-referrer'}]
+  print('case01b forecast 24/48, low confidence, visible attribution, no credentials PASS',forecast)
   cache=await a.evaluate('localStorage.getItem("codex-quota-cn-shared-data-v14")')
-  assert cache
-  # The same cached quota in another tab avoids a redundant request.
-  b=await ctx.new_page();await add_script(b,cache)
+  fc=await a.evaluate('localStorage.getItem("codex-quota-cn-forecast-data-v15")')
+  assert cache and fc
+  # Both caches should be reusable without cross-origin requests in the next tab.
+  b=await ctx.new_page();await add_script(b,cache,fc)
   assert await b.evaluate('window.__requests')==0, 'cache not reused'
-  print('case02 cross-tab cached read without duplicate endpoint call PASS')
+  assert await b.evaluate('window.__forecastRequests')==0,'forecast cache not reused'
+  print('case02 cross-tab cached quota and forecast reads PASS')
   # Page visibility independent
   await ui(a,'''s.querySelector('#close').click()''')
   assert await a.locator(HOST).evaluate('e=>e.style.display')=='none'
@@ -111,6 +131,36 @@ async def main():
   await a.wait_for_timeout(450)
   assert await a.locator(HOST).evaluate('e=>e.style.display')=='none'
   print('case12 SPA hidden preserved PASS')
+  # Invalid or very old values are never shown as active probabilities.
+  for mode in ('stale','invalid'):
+   c=await ctx.new_page(); await c.set_content(PAGE); await c.evaluate(SETUP)
+   await c.evaluate('(mode)=>window.__forecastMode=mode',mode)
+   await c.evaluate(JS);await c.wait_for_timeout(600)
+   value=await ui(c,'''s.querySelector('#forecast .value').textContent''')
+   assert '22%' not in value and '85%' not in value,value
+   assert '预测暂不可用' in value or '数据已过期' in value,value
+   await c.close()
+  print('case13 old or inconsistent community odds fail closed PASS')
+  # A ChatGPT CSP error can be bypassed through the OPTIONAL permission-limited
+  # Edge bridge; no app credentials are sent to the provider.
+  c=await ctx.new_page();await c.set_content(PAGE);await c.evaluate(SETUP)
+  await c.evaluate('''() => {
+    window.__forecastMode='blocked';
+    window.postMessage=(payload)=>{
+      if(payload?.type!=='FORECAST_REQUEST') return;
+      queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message', {
+        source:window,origin:location.origin,
+        data:{channel:'codex-quota-forecast-v15',type:'FORECAST_RESULT',nonce:payload.nonce,
+          ok:true,forecast:{updated_at:new Date().toISOString(),confidence:'medium',
+            probabilities:{rounded_24h:28,rounded_48h:44}}}}
+      )));
+    };
+  }''')
+  await c.evaluate(JS);await c.wait_for_timeout(600)
+  value=await ui(c,'''s.querySelector('#forecast .value').textContent''')
+  assert '24h 28%' in value and '48h 44%' in value,value
+  print('case14 CSP-blocked external fetch uses optional browser bridge PASS')
+  await c.close()
   # real screenshot illustrating compact panel (mock values - not user's real account)
   preview=await ctx.new_page();await preview.set_viewport_size({'width':825,'height':600})
   await add_script(preview)
@@ -118,8 +168,8 @@ async def main():
     source:window,origin:location.origin,data:{channel:'codex-quota-ram-v14',type:'RAM_RESULT',
     capacity:16*1024**3,availableCapacity:3.0*1024**3}}))''')
   await preview.wait_for_timeout(150)
-  await preview.screenshot(path=str(Path(tempfile.gettempdir())/'codex_v14_preview_mock.png'))
-  print('case13 preview screenshot saved')
+  await preview.screenshot(path=str(Path(tempfile.gettempdir())/'codex_v15_preview_mock.png'))
+  print('case15 preview screenshot saved')
   await browser.close()
 
 asyncio.run(main())

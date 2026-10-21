@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Codex Web Quota Bars (5h + 7d + system RAM, CN)
+// @name         Codex Web Quota Bars (5h + 7d + global reset odds + system RAM, CN)
 // @namespace    https://chatgpt.com/
-// @version      1.4.0
-// @description  Split-screen quotas, per-tab controls, color-only warnings, shared read-only quota cache, optional Edge system RAM companion.
+// @version      1.5.0
+// @description  5h/7d quotas, community 24h/48h extraordinary global reset forecast, system RAM, color-only warnings and per-tab controls.
 // @match        https://chatgpt.com/*
 // @run-at       document-idle
 // @grant        none
@@ -11,8 +11,9 @@
 
 (() => {
   'use strict';
-  // Unofficial, undocumented first-party quota endpoint; no remote dependencies.
-  // System RAM is OPTIONAL and requires the bundled local Edge extension.
+  // Quota endpoint is unofficial and first-party. The forecast is an optional,
+  // unaffiliated public read-only service. No ChatGPT credentials or usage values
+  // are sent to the forecast provider. Optional Edge bridge handles CSP fallback.
   const ID = 'codex-quota-cn-overlay-v1';
   if (document.getElementById(ID)) return;
   const CONFIG = {
@@ -28,7 +29,19 @@
     cacheTtlMs: 125000,
     lockLeaseMs: 19000,
     memoryIntervalMs: 30000,
-    ramChannel: 'codex-quota-ram-v14',
+    ramChannel: 'codex-quota-ram-v14', // v1.4 memory protocol remains unchanged
+    forecastUrl: 'https://codex-reset.com/api/forecast',
+    forecastSource: 'https://codex-reset.com/',
+    forecastChannel: 'codex-quota-forecast-v15',
+    forecastCacheKey: 'codex-quota-cn-forecast-data-v15',
+    forecastLockKey: 'codex-quota-cn-forecast-lock-v15',
+    forecastAttemptKey: 'codex-quota-cn-forecast-attempt-v15',
+    forecastRefreshMs: 20 * 60 * 1000,
+    forecastMinGapMs: 60 * 1000,
+    forecastLockLeaseMs: 20000,
+    forecastTimeoutMs: 12000,
+    forecastMaxSourceAgeMs: 6 * 60 * 60 * 1000,
+    forecastMaxCacheAgeMs: 2 * 60 * 60 * 1000,
   };
   const T = {
     heading:'Codex 额度', five:'5 小时限额', week:'7 天限额',
@@ -38,6 +51,8 @@
     empty:'接口未返回额度窗口', login:'请检查登录状态', stale:'旧数据',
     now:'待服务器刷新', minute:'分', hour:'时', day:'天', second:'秒',
     memory:'电脑内存', noMemory:'需装内存组件', unavailable:'暂不可用',
+    forecast:'额外全局重置', forecastMissing:'预测暂不可用',
+    forecastLoading:'读取预测中', forecastStale:'数据已过期',
   };
 
   // UI location and fold state are per-tab. Import v1.3 layout once as a starting point.
@@ -187,6 +202,13 @@
       .reset { display:flex;justify-content:space-between;gap:5px;margin-top:2px;
         color:var(--muted);font-size:10px;line-height:14px; }
       .reset span { white-space:nowrap; }
+      .forecast .line { margin-bottom:1px; }
+      .forecast .value { font-size:10px;letter-spacing:-.05px; }
+      .forecast .reset { margin-top:0;line-height:12px; }
+      .forecast a { color:var(--muted);text-decoration:underline;text-underline-offset:2px; }
+      .forecast a:hover { color:var(--text); }
+      .forecast .forecast-meta { max-width:170px;overflow:hidden;
+        text-overflow:ellipsis;white-space:nowrap;text-align:right; }
       .memory .line { margin-bottom:3px; }
       .memory .value { font-size:10px; }
       .memory .track { height:3px; }
@@ -215,6 +237,10 @@
           <div class="track" role="progressbar" aria-label="7 day remaining" aria-valuemin="0" aria-valuemax="100"><div class="fill"></div></div>
           <div class="reset"><span class="time">${T.missingReset}</span><span class="countdown">--</span></div>
         </div>
+        <div class="metric forecast" id="forecast" title="24/48小时内的额外全局重置：第三方实验概率，不是个人5小时/7天正常重置，也不含存储重置卡；不代表官方承诺">
+          <div class="line"><span class="label">${T.forecast}</span><strong class="value">${T.forecastLoading}</strong></div>
+          <div class="reset"><span><a href="https://codex-reset.com/" target="_blank" rel="noopener noreferrer" title="第三方预测数据来源，非 OpenAI 官方">数据: codex-reset.com</a></span><span class="forecast-meta">实验预测 · 无个人数据上传</span></div>
+        </div>
         <div class="metric memory" id="memory" title="需要本 ZIP 内 Edge 内存组件；物理内存总量减可用量，并非 Edge 单独内存">
           <div class="line"><span class="label">${T.memory}</span><strong class="value">${T.noMemory}</strong></div>
           <div class="track" role="progressbar" aria-label="System physical RAM used" aria-valuemin="0" aria-valuemax="100"><div class="fill"></div></div>
@@ -229,6 +255,7 @@
   let limits = {five:null,week:null};
   let lastSuccess = null, lastError = null, busy = false, waiting = false;
   let memoryInfo = null, memoryError = null, memorySeen = false;
+  let forecastInfo=null,forecastError=null,forecastBusy=false;
 
   function updateTheme() {
     const dark = document.documentElement.classList.contains('dark') ||
@@ -302,6 +329,26 @@
       ram.querySelector('.value').textContent = memorySeen ? (memoryError || T.unavailable) : T.noMemory;
       ramBar.style.width = '0%';
       ramTrack.removeAttribute('aria-valuenow');
+    }
+    const odds=el('#forecast'), oddsValue=odds.querySelector('.value');
+    const oddsMeta=odds.querySelector('.forecast-meta');
+    const forecastFresh=forecastInfo && forecastInfo.updatedAt &&
+      now-forecastInfo.updatedAt < CONFIG.forecastMaxSourceAgeMs &&
+      forecastInfo.updatedAt <= now+5*60000 &&
+      now-forecastInfo.fetchedAt < CONFIG.forecastMaxCacheAgeMs;
+    if (forecastFresh) {
+      oddsValue.textContent=`24h ${forecastInfo.p24}% · 48h ${forecastInfo.p48}%`;
+      const conf={low:'低',medium:'中',high:'高'}[forecastInfo.confidence]||'未知';
+      const tm=new Date(forecastInfo.updatedAt).toLocaleTimeString('zh-CN',
+        {hour:'2-digit',minute:'2-digit'});
+      oddsMeta.textContent=forecastError ? `上次有效 · ${tm} 更新` :
+        `${conf}置信度 · ${tm} 更新`;
+      odds.title=`第三方实验预测（非官方承诺）。${tm}更新；模型置信度${conf}。仅预测额外全局重置，不包括个人常规重置或存储重置卡。${forecastError ? '最近一次刷新失败，当前展示上次有效快照。' : ''}`;
+    } else {
+      oddsValue.textContent=forecastBusy ? T.forecastLoading :
+        forecastInfo ? T.forecastStale : T.forecastMissing;
+      oddsMeta.textContent=forecastError ? `预测接口异常 · 点击来源核对` :
+        forecastInfo ? '预测已过期 · 查看来源' : '实验预测 · 非官方';
     }
     const short = key => limits[key] ? formatPercent(limits[key].remaining) : '--';
     const ramShort = memoryInfo && now-memoryInfo.sampledAt<120000 ?
@@ -435,6 +482,127 @@
     }
   }
 
+  // ----- Unofficial exceptional reset probability (read-only third-party) -----
+  // Use only documented public API fields; banked credits are not mixed in.
+  function sanitizeForecast(raw, receivedAt=Date.now()) {
+    if (!raw || typeof raw!=='object') return null;
+    const api=raw.probabilities && typeof raw.probabilities==='object' ? raw : null;
+    const fetchedAt=api ? receivedAt : raw.fetchedAt;
+    if (!Number.isFinite(fetchedAt) || fetchedAt>Date.now()+60000 ||
+        fetchedAt<Date.now()-CONFIG.forecastMaxCacheAgeMs) return null;
+    const p24=api ? api.probabilities.rounded_24h : raw.p24;
+    const p48=api ? api.probabilities.rounded_48h : raw.p48;
+    const updatedAt=api ? Date.parse(raw.updated_at) : raw.updatedAt;
+    const confidence=String(raw.confidence||'unknown').toLowerCase();
+    if (!Number.isInteger(p24)||!Number.isInteger(p48)||p24<0||p24>100||
+        p48<0||p48>100||p48<p24 || !Number.isFinite(updatedAt) ||
+        updatedAt>Date.now()+5*60000 || Date.now()-updatedAt>CONFIG.forecastMaxSourceAgeMs) return null;
+    return {p24,p48,confidence:['low','medium','high'].includes(confidence)?confidence:'unknown',
+      updatedAt,fetchedAt};
+  }
+  function readForecastCache() {
+    try {return sanitizeForecast(JSON.parse(localStorage.getItem(CONFIG.forecastCacheKey)||'null'));}
+    catch (_) {return null;}
+  }
+  function applyForecastSnapshot(snapshot) {
+    if (!snapshot || (forecastInfo && snapshot.fetchedAt<forecastInfo.fetchedAt)) return;
+    forecastInfo=snapshot;forecastError=null;draw();
+  }
+  window.addEventListener('storage',event=>{
+    if (event.key===CONFIG.forecastCacheKey && event.newValue) {
+      try {applyForecastSnapshot(sanitizeForecast(JSON.parse(event.newValue)));}
+      catch (_) { /* ignore invalid external cache */ }
+    }
+  });
+  const initialForecast=readForecastCache();
+  if (initialForecast) applyForecastSnapshot(initialForecast);
+  function forecastLockOwner(now) {
+    try {const x=JSON.parse(localStorage.getItem(CONFIG.forecastLockKey)||'null');
+      return x && typeof x.id==='string' && Number.isFinite(x.expiry) && x.expiry>now?x.id:null;
+    } catch (_) {return null;}
+  }
+  function acquireForecastLock() {
+    const now=Date.now();
+    try {
+      if (forecastLockOwner(now) && forecastLockOwner(now)!==tabId) return false;
+      localStorage.setItem(CONFIG.forecastLockKey,JSON.stringify({id:tabId,
+        expiry:now+CONFIG.forecastLockLeaseMs}));
+      return forecastLockOwner(now)===tabId;
+    } catch (_) {return true;}
+  }
+  function releaseForecastLock() {
+    try {if (forecastLockOwner(Date.now())===tabId)
+      localStorage.removeItem(CONFIG.forecastLockKey);
+    } catch (_) { /* fallback */ }
+  }
+  // ChatGPT's CSP can deny cross-origin fetch even though the provider allows CORS.
+  // The optional v1.5 Edge companion therefore offers a permission-scoped fallback.
+  function requestForecastFromBridge(signal) {
+    return new Promise((resolve,reject)=>{
+      const nonce=`${tabId}-${Math.random().toString(36).slice(2)}`;
+      let done=false;
+      const cleanup=()=>{window.removeEventListener('message',receive);
+        clearTimeout(timer);signal?.removeEventListener('abort',abort);};
+      const finish=(err,value)=>{if(done)return;done=true;cleanup();err?reject(err):resolve(value);};
+      const receive=ev=>{
+        if (ev.source!==window||ev.origin!==location.origin ||
+            ev.data?.channel!==CONFIG.forecastChannel ||
+            ev.data?.type!=='FORECAST_RESULT' || ev.data?.nonce!==nonce) return;
+        if (!ev.data.ok) finish(new Error('Forecast bridge unavailable'));
+        else finish(null,ev.data.forecast);
+      };
+      const abort=()=>finish(new DOMException('Aborted','AbortError'));
+      const timer=setTimeout(()=>finish(new Error('Forecast bridge not installed or timed out')),8500);
+      window.addEventListener('message',receive);
+      if (signal) signal.addEventListener('abort',abort,{once:true});
+      if (signal?.aborted) {abort();return;}
+      window.postMessage({channel:CONFIG.forecastChannel,type:'FORECAST_REQUEST',nonce},location.origin);
+    });
+  }
+  async function requestForecast(signal) {
+    // No credentials, bearer tokens, quota readings, RAM values or chat data are sent.
+    try {
+      const response=await fetch(CONFIG.forecastUrl,{method:'GET',mode:'cors',
+        credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer',
+        headers:{Accept:'application/json'},signal});
+      if (!response.ok) throw new Error(`Forecast HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      if (error?.name==='AbortError') throw error;
+      return requestForecastFromBridge(signal);
+    }
+  }
+  async function refreshForecast(force=false) {
+    if (forecastBusy || hidden || document.visibilityState==='hidden') return;
+    const cached=readForecastCache();
+    if (cached) applyForecastSnapshot(cached);
+    if (!force && cached && Date.now()-cached.fetchedAt<CONFIG.forecastRefreshMs) return;
+    // Never poll faster than the provider's documented minimum, even on button presses.
+    try {const t=Number(localStorage.getItem(CONFIG.forecastAttemptKey)||0);
+      if (Number.isFinite(t) && t>Date.now()-CONFIG.forecastMinGapMs && t<=Date.now()+60000) return;
+    } catch (_) { /* optional pacing */ }
+    if (!acquireForecastLock()) return;
+    forecastBusy=true;forecastError=null;draw();
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),CONFIG.forecastTimeoutMs);
+    try {
+      try {localStorage.setItem(CONFIG.forecastAttemptKey,String(Date.now()));}
+      catch (_) { /* optional throttle */ }
+      const response=await requestForecast(controller.signal);
+      const snapshot=sanitizeForecast(response);
+      if (!snapshot) throw new Error('Invalid or stale third-party forecast');
+      applyForecastSnapshot(snapshot);
+      try {localStorage.setItem(CONFIG.forecastCacheKey,JSON.stringify(snapshot));}
+      catch (_) { /* optional cross-tab cache */ }
+    } catch (error) {
+      forecastError=error?.name==='AbortError'?'预测超时':String(error?.message||error);
+      console.info('[Codex Quota Bars] Forecast unavailable:',forecastError);
+    } finally {
+      clearTimeout(timer);forecastBusy=false;releaseForecastLock();draw();
+    }
+  }
+  // ----- End forecast reader -----
+
   // Optional local companion: Edge Manifest V3 system.memory -> content script -> page event.
   // Never guess system RAM from navigator.deviceMemory or JS heap stats.
   window.addEventListener('message',ev=>{
@@ -543,13 +711,13 @@
     if (hidden===Boolean(state)) return;
     hidden=Boolean(state);persistVisibility();avoidPosition=null;
     applyVisibility();
-    if (!hidden) {refresh(true);requestMemory();}
+    if (!hidden) {refresh(true);refreshForecast(false);requestMemory();}
   }
   function dockBottomRight() {
     uiState.left=null;uiState.top=null;avoidPosition=null;
     persistUi();applyPosition();scheduleAvoid();
   }
-  el('#refresh').addEventListener('click',ev=>{ev.stopPropagation();refresh(true);requestMemory();});
+  el('#refresh').addEventListener('click',ev=>{ev.stopPropagation();refresh(true);refreshForecast(true);requestMemory();});
   el('#close').addEventListener('click',ev=>{ev.stopPropagation();setHidden(true);});
   document.addEventListener('keydown',ev=>{
     if (ev.repeat||ev.defaultPrevented||ev.isComposing||
@@ -587,7 +755,7 @@
   sizeObserver.observe(host);
   document.addEventListener('visibilitychange',()=>{
     if (document.visibilityState==='visible' && !hidden) {
-      refresh();requestMemory();scheduleAvoid();
+      refresh();refreshForecast();requestMemory();scheduleAvoid();
     }
   });
   // Check only while editing; no scroll, mouse tracking, or continuous DOM scanning.
@@ -620,7 +788,9 @@
   setInterval(()=>{if (!hidden)draw();},1000); // locally update countdown only
   setInterval(()=>{observeCurrentBody();requestRecovery();},3000);
   setInterval(()=>{if (!hidden&&document.visibilityState==='visible')refresh();},CONFIG.refreshMs);
+  setInterval(()=>{if (!hidden&&document.visibilityState==='visible')refreshForecast();},
+    CONFIG.forecastRefreshMs);
   setInterval(requestMemory,CONFIG.memoryIntervalMs);
   // Stagger multiple tabs to reduce quota request collisions at startup.
-  setTimeout(()=>{if (!hidden)refresh();requestMemory();},250+Math.floor(Math.random()*240));
+  setTimeout(()=>{if (!hidden) {refresh();refreshForecast();}requestMemory();},250+Math.floor(Math.random()*240));
 })();
