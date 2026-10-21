@@ -1,18 +1,13 @@
-# Tests
+# Verification
 
-`bridge.test.cjs` runs with built-in Node.js modules only:
+1. `node --check userscript/Codex_Quota_Bars_Web_CN_v1.6.user.js`
+2. `node --check edge-extension/background.js && node --check edge-extension/bridge.js`
+3. `node tests/manifest.test.cjs`
+4. `node tests/bridge.test.cjs`
+5. `python tests/browser.test.py` (requires Chromium and the Playwright Python package)
 
-```bash
-node tests/bridge.test.cjs
-```
+The browser UI test uses synthetic percentages, memory and dates and verifies: narrow idle edge handle, two-ring hover preview, 5h/7d + weekly reset, forecast only on hover/details, RAM over-90 badge, three-stage interactions, outside click/Escape, no hover flicker, split widths, true per-tab close/reopen, and ChatGPT SPA DOM recovery.
 
-`browser.test.py` is an optional interactive/DOM smoke test using Playwright with synthetic quota, forecast and RAM data (no ChatGPT login required). Install the Python `playwright` package and a supported Chromium binary, then run:
+The extension test checks memory API/cache, hard-coded public forecast GET without credentials, origin restriction, and the backward-compatible forecast message protocol.
 
-```bash
-python -m playwright install chromium
-python tests/browser.test.py
-```
-
-If using a system Chromium binary, set `CODEX_TEST_CHROMIUM_PATH` to its executable path. The test writes a mock-only screenshot to the operating system's temporary directory.
-
-**Limitations:** mock tests verify local logic and UI behavior, not the real-world availability or predictive accuracy of the third-party forecast, the unofficial ChatGPT endpoint or Windows extension integration on a specific device.
+No test proves third-party website reliability or current first-party API availability; such claims require actual user-browser testing.

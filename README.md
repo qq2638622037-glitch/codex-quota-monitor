@@ -1,88 +1,70 @@
-# Codex Quota Monitor
+# Codex Quota Monitor — v1.6.0
 
-**A compact unofficial Codex quota, exceptional-reset forecast, and physical RAM overlay for ChatGPT on Edge / Chrome.**
+**An unofficial dockable two-ring quota orb for split-screen ChatGPT use in Edge / Chrome.**
 
-[简体中文说明 / Chinese README](README.zh-CN.md) · [How the forecast works](docs/FORECAST_METHOD.md)
+[中文安装与说明 / Chinese instructions](README.zh-CN.md) · [Forecast methodology and caveats](docs/FORECAST_METHOD.md)
 
-Version **v1.5.0** · MIT License · Not affiliated with OpenAI or the forecast provider.
+MIT licensed · No affiliation with OpenAI or the forecast data provider.
 
-## Features
+![v1.6 preview, synthetic test data](docs/images/v1.6-simulated-preview.png)
 
-- Actual 5-hour and 7-day remaining Codex allowances (only when returned by your own ChatGPT session), with reset timestamps and countdowns.
-- **New in v1.5:** community-estimated probability of an **extraordinary global Codex/Work usage-limit reset within the next 24 or 48 hours**, with visible data-source credit, model confidence and update time.
-- Compact overlay for split-screen use; draggable, collapsible, and independent per-tab hide/reopen (`Ctrl + Alt + Q`).
-- Automatic recovery after ChatGPT page updates, conservative avoidance of the active input area, cross-tab short-term quota and forecast caching.
-- Color-only low-quota and high-RAM warnings (no popup, sound, notification, or automatic cleanup).
-- Optional Edge/Chrome Manifest V3 companion to show **whole-PC physical RAM** and retrieve forecasts if ChatGPT's CSP blocks an external fetch.
+*Illustrative Playwright screenshot using mock data, not a real account.*
 
-> **Important distinction:** the forecast concerns *unscheduled global top-ups* sometimes publicly announced by Tibo/OpenAI. It does **not** predict the ordinary 5-hour/7-day timers shown above and does **not** include banked reset credits. Probabilities are experimental third-party estimates, **not** promises of a reset or personalized account eligibility.
->
-> **Forecast data and attribution:** [codex-reset.com](https://codex-reset.com/) via its [free public JSON API](https://codex-reset.com/developers/). The provider's required attribution is also displayed immediately beside the forecast in the overlay. API terms and estimates are subject to change. We do not copy its code or claim to have created its statistical model.
+## New in v1.6.0
 
-## Quick start
+- **Docked:** a 13px edge handle, with almost no persistent screen footprint. Transparent widget areas don't intercept page clicks.
+- **Hover:** a 100px two-ring orb showing **5h remaining**, **7d remaining**, and **7d reset date/time**. Experimental third-party 24h/48h extraordinary global reset estimates appear only on hover, with source attribution.
+- **Click orb:** a compact 282px detail popup with both reset countdowns, source status, and whole-PC RAM readings. Click outside, press `Esc`, or use the collapse control to dock it.
+- **RAM > 90%:** a small red RAM badge appears in the hover orb; otherwise RAM is omitted there (but always available in details). Color-only quota risk indicators, no system notifications, popups, sound, or automatic cleanup.
+- **Per-tab:** each tab retains its own show/hide state and edge location. `Ctrl+Alt+Q` remains the explicit hide/reopen toggle. You can drag the handle or detail title to change edge/height, or double-click the detail title to reset.
+- **Forecast fetch:** prefers the permission-limited extension background service and falls back to a read-only page fetch when possible, with bounded retries and shared short-term caching.
 
-### 1. Required: Tampermonkey userscript
+## Quick installation
 
-1. Install a userscript manager such as Tampermonkey in Edge or Chrome. Enable userscripts as directed by that extension.
-2. Download the [v1.5.0 installation ZIP](dist/codex-quota-monitor-v1.5.0-install.zip) from this repo (**View raw** / Download), **or** download the repository using **Code → Download ZIP**.
-3. Extract it. In Tampermonkey's dashboard use **Utilities → Import from file**, selecting [`userscript/Codex_Quota_Bars_Web_CN_v1.5.user.js`](userscript/Codex_Quota_Bars_Web_CN_v1.5.user.js) (the install ZIP puts the userscript at the root).
-4. Disable/delete any old v1.4 (or earlier) version of this userscript to avoid duplicate panels.
-5. Open and refresh [chatgpt.com](https://chatgpt.com/) while logged in.
+1. Install and enable **Tampermonkey** in Edge/Chrome.
+2. Download and unzip the [v1.6.0 installation package](dist/codex-quota-monitor-v1.6.0-install.zip). In Tampermonkey, **disable the previous version**, then import `Codex_Quota_Bars_Web_CN_v1.6.user.js` from the package.
+3. Already have the **v1.5 RAM & forecast companion extension**? You may keep it installed; v1.6 uses the same RAM and forecast messaging protocols and host permissions.
+4. For first-time installation of optional PC RAM and reliable forecast fallback, enable Developer mode at `edge://extensions` or `chrome://extensions`, then **Load unpacked** and choose `Edge_RAM_Forecast_Bridge_v1.6/` from the extracted ZIP. The folder must contain `manifest.json`.
+5. Refresh [chatgpt.com](https://chatgpt.com/), hover the narrow side handle, then click the orb to inspect details. If the overlay had been explicitly closed in that tab, press `Ctrl+Alt+Q` to reopen it.
 
-The quota overlay still works without the optional companion extension. Forecast retrieval will try a public HTTPS GET directly; if ChatGPT CSP prevents it, the forecast row may be unavailable until you install the v1.5 companion.
+You can use the quota-only feature without the companion. Reading physical RAM requires the companion; the experimental forecast may fail when page security policy blocks cross-origin requests.
 
-### 2. Optional, recommended: RAM and forecast-bridge extension
+## What the data means
 
-1. Unpack the install ZIP into a permanent directory.
-2. Open `edge://extensions` in Edge or `chrome://extensions` in Chrome; enable Developer mode if allowed by your organization.
-3. **Remove the older local v1.4 RAM bridge extension** if present, then **Load unpacked**, pointing to the new `Edge_RAM_Forecast_Bridge_v1.5/` folder (or `edge-extension/` when using the source ZIP).
-4. Refresh ChatGPT. System RAM shows when the `system.memory` API is available. Forecasts can also be fetched by this extension if page CSP blocks direct access.
+- Quota percentages and reset timestamps are read from the logged-in user's first-party `/backend-api/wham/usage` endpoint. This is undocumented and may change.
+- **Forecast**: `GET https://codex-reset.com/api/forecast`, using only the public fields `probabilities.rounded_24h`, `rounded_48h`, `updated_at` and `confidence`. These probabilities concern *possible unscheduled global Codex quota top-ups*, **not** your ordinary 5-hour/7-day refresh, and **not** banked reset credits. They are experimental third-party estimates and **not a promise or an official forecast**. Attribution and a source link are visible alongside any estimates.
+- Forecast data is rejected when missing, inconsistent or stale. Successes are cached for around 20 minutes; shared source/cached freshness checks remain in place. If the source is inaccessible, the widget states this instead of inventing values. **Opening the provider website manually should not normally be necessary**, but background fetching cannot bypass the provider's own outages, challenges, or network restrictions.
+- RAM is whole-PC physical usage estimated from `capacity - availableCapacity`, which can differ slightly from Windows Task Manager. It is not per-tab or per-process memory usage.
 
-The v1.5 extension requests only `system.memory` plus a **single HTTPS host permission** for `https://codex-reset.com/*`. It has no access to browser history or any additional domains. The extension never sends RAM values, ChatGPT quota balances, account identifiers, credentials, page contents or session tokens to the forecast provider. Only a fixed public GET is sent, without cookies/referrer.
+## Refresh and privacy
 
-## Controls
+- Usage: approximately every 2 minutes while the tab is visible and the widget isn't explicitly hidden, with best-effort shared cache/lock across ChatGPT tabs.
+- RAM: approximately every 30 seconds in the same conditions.
+- Forecast: uses a 20-minute success interval, bounded failure retry delays, best-effort cross-tab lock and a minimum 1-minute request gap. No proactive fetching when the widget is explicitly closed.
+- Forecast GET carries **no ChatGPT credentials, quota values, RAM values, chat content or account IDs**. It uses `credentials:'omit'` and no referrer. The provider necessarily sees the public IP and normal HTTPS request metadata.
+- The optional MV3 extension uses only `system.memory`, `https://codex-reset.com/*`, and a content script confined to `https://chatgpt.com/*`. No analytics or telemetry is added.
 
-| Action | What it does |
-| --- | --- |
-| `×` | Hide the overlay in the current tab |
-| `Ctrl + Alt + Q` | Reopen/hide the overlay in this tab |
-| `−` / `+` | Collapse/expand the small panel |
-| Refresh arrow | Refresh quotas and forecast, subject to the forecast source's 1-minute minimum poll spacing |
-| Drag title | Move the overlay for this tab |
-| Double-click title | Restore default position |
-| `Data: codex-reset.com` | Open the third-party forecast source |
-
-The display and position settings are independent in each tab. Shared percentages/time values are cached across same-origin tabs to reduce redundant network requests. Memory uses a short local extension cache. Forecasts are ordinarily checked around every **20 minutes** while a visible, open ChatGPT tab has the panel enabled; this is not a background watchdog.
-
-## Forecast rules and failure handling
-
-- Use only documented `probabilities.rounded_24h`, `probabilities.rounded_48h`, `confidence`, and `updated_at` from `GET https://codex-reset.com/api/forecast`.
-- Results are checked for type, ordering (48h ≥ 24h) and freshness; predictions with source timestamps older than **6 hours** are not shown as current. Cached data has a maximum lifetime of **2 hours**.
-- A short-term cache is shared across tabs; the site isn't polled more often than once per minute per browser profile on a best-effort basis.
-- An unreachable, outdated or invalid provider returns **"预测暂不可用" / "数据已过期"**, rather than an invented probability. Existing quota and RAM rows keep working.
-- No averaging of unrelated community estimates; third-party model assumptions, data gaps and forecast accuracy are explained in [FORECAST_METHOD.md](docs/FORECAST_METHOD.md).
-
-## Privacy and limits
-
-- The userscript reads only your **first-party** ChatGPT quota endpoint (`/backend-api/wham/usage`) and may temporarily request `/api/auth/session` after HTTP 401/403 to authenticate the quota request. Bearer tokens stay in runtime memory and are **never** transmitted to codex-reset.com.
-- Forecast requests use `credentials:'omit'` and `referrerPolicy:'no-referrer'`. The provider will necessarily see your network IP and ordinary request metadata, but **not** your ChatGPT session/usage. If you do not want an external request, stay on v1.4.0 or disable the v1.5 userscript.
-- The extension has no access to other websites, browser history, or individual application memory; `system.memory` reports total RAM capacity and available capacity only. Physical RAM usage is `capacity - available`, which may differ slightly from Task Manager's counters.
-- Local storage contains UI state, sanitized usage readings, and the third-party **public forecast only**. No analytics, ads, automatic reset-card redemption, or push notifications.
-- ChatGPT quota endpoints are undocumented; community probabilities may be inaccurate, delayed or completely unavailable. Do not treat this product as an official OpenAI client.
-- Unpacked extensions can be restricted by company/browser policies; respect those controls. Do not paste session cookies, JWTs, screenshots with personal information, or conversation data into public issues.
-
-## Test and repository layout
+## Repo layout / testing
 
 ```text
-userscript/                     Tampermonkey v1.5 userscript
-edge-extension/                 Optional Manifest V3 RAM & forecast bridge
-tests/                          Node test suite and Playwright UI test
-docs/FORECAST_METHOD.md         Model semantics and source attribution
-.github/workflows/             Source checks on pushes and PRs
-README.zh-CN.md                 Chinese installation and privacy guide
+userscript/                     Userscript v1.6
+edge-extension/                 MV3 RAM and forecast companion (compatible with v1.5)
+tests/                          Node checks + Playwright simulated UI test
+docs/FORECAST_METHOD.md         Source semantics and prediction limitations
+dist/                           Prebuilt installation ZIP and SHA-256 hashes
+.github/workflows/             CI source syntax and bridge contract checks
+README.zh-CN.md                 Chinese installation instructions
 LICENSE                         MIT License
 ```
 
-Run `node --check userscript/Codex_Quota_Bars_Web_CN_v1.5.user.js`, `node tests/manifest.test.cjs`, and `node tests/bridge.test.cjs`. The optional Playwright smoke suite is `python tests/browser.test.py`. Simulated tests do **not** prove the provider or ChatGPT interface will work on every real account and network.
+Run:
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) before submitting issues or pull requests.
+```bash
+node --check userscript/Codex_Quota_Bars_Web_CN_v1.6.user.js
+node tests/manifest.test.cjs
+node tests/bridge.test.cjs
+# optional Chromium + Playwright environment
+python tests/browser.test.py
+```
+
+**Test limitations:** browser UI tests use mocked quota, forecast, and RAM values; they do not demonstrate successful real-world source access on every account/network. The downloaded userscript is not an official OpenAI extension. Don't post tokens, cookies, or private chats in public issues. See [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md).

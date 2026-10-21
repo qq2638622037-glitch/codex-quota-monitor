@@ -14,7 +14,7 @@ jobs:
           node-version: '22'
       - name: Check userscript and extension syntax
         run: |
-          node --check userscript/Codex_Quota_Bars_Web_CN_v1.5.user.js
+          node --check userscript/Codex_Quota_Bars_Web_CN_v1.6.user.js
           node --check edge-extension/background.js
           node --check edge-extension/bridge.js
       - name: Validate extension manifest and permissions

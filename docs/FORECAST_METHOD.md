@@ -23,8 +23,8 @@ Other independent community pages (such as https://nextreset.ai/ and https://tib
 
 - Forecast site API documented fields only; predictions and timestamps are range-checked.
 - The provider's `updated_at` must be no older than **6 hours**; a cached response is discarded after **2 hours**, even if its source timestamp is newer.
-- Requests are normally sent every **20 minutes** while a ChatGPT tab is visible and the panel is open, with a cooperative cross-tab lock and no more than one attempt per minute per browser profile (best effort).
-- If the provider is unavailable, CSP blocks the page request and no v1.5 extension is installed, or the response fails validation: display *unavailable*, not an invented number. Account quota and memory functions remain independent.
-- The optional companion extension makes the public read-only GET with `credentials: omit`, without sending account tokens, ChatGPT usage readings, conversation text, or system RAM details.
+- Successful predictions are usually rechecked around every **20 minutes** while a ChatGPT tab is visible and the monitor is not explicitly closed; failed attempts use bounded retries, with a cooperative cross-tab lock and no more than one attempt per minute per browser profile (best effort).
+- If the provider is unavailable, the installed extension and page-level fallback are both blocked, or the response fails validation: display *unavailable*, not an invented number. Account quota and memory functions remain independent.
+- The optional companion extension is tried first; where unavailable the page-level GET is attempted with the same privacy restrictions. The extension makes the public read-only GET with `credentials: omit`, without sending account tokens, ChatGPT usage readings, conversation text, or system RAM details.
 
 This tool is not sponsored, endorsed, reviewed, or operated by OpenAI or by the forecast provider. Public forecasts may be wrong, missing events, stale, or poorly calibrated; they are unsuitable as the sole basis of purchasing/spending a reset credit.

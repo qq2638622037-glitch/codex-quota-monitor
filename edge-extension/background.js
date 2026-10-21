@@ -1,4 +1,4 @@
-// Quota v1.5 companion. RAM data remains local; forecast fetch is a fixed public
+// Quota v1.6 companion (v1.5 protocol compatible). RAM data remains local; forecast fetch is a fixed public
 // GET without credentials or any quota, account, memory, chat or session values.
 let cached = null;
 let cachedAt = 0;

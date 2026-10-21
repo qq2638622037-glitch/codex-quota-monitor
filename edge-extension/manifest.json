@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Codex RAM and Reset Forecast Bridge",
-  "version": "1.5.0",
-  "description": "Optional companion: local system RAM and public global-reset forecast. No ChatGPT account data sent to the forecast service.",
+  "version": "1.6.0",
+  "description": "Optional companion for the v1.6 dockable quota orb: local system RAM and public global-reset forecast. No ChatGPT account data sent to the forecast service.",
   "permissions": ["system.memory"],
   "host_permissions": ["https://codex-reset.com/*"],
   "content_scripts": [
